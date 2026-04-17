@@ -74,10 +74,10 @@ def main():
                 fun_unit.functional_unit_state.call_lads_method(
                     "StartProgram",
                     properties,
-                    ua.Variant("1", ua.VariantType.String),
-                    ua.Variant("1", ua.VariantType.String),
+                    ua.Variant("MyTestVariable1", ua.VariantType.String),
+                    ua.Variant("MyTestVariable2", ua.VariantType.String),
                     samples,
-                    ua.Variant("1", ua.VariantType.String)
+                    ua.Variant("MyTestVariable3", ua.VariantType.String)
                 )
             )
 
@@ -85,6 +85,12 @@ def main():
 
             # Wait for the async task to be evaluated
             time.sleep(1)
+
+            fun_unit.functional_unit_state.call_async(
+                fun_unit.functional_unit_state.call_lads_method(
+                    "Stop"
+                )
+            )
 
         except Exception as e:
             print(f"Error calling StartProgram: {e}")
@@ -95,6 +101,7 @@ def main():
     for device in server.devices:
         print("  Device: ", device.unique_name)
 
+    """
     functional_units = server.functional_units
     print("  Number of functional_units: ", len(functional_units))
     for fu in functional_units:
@@ -109,6 +116,7 @@ def main():
             for var in variables:
                 print("        Name of variable: ", var.display_name)
                 print("        Value of variable: ", var.value_str)
+    """
 
     conn.disconnect()
 
