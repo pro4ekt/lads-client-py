@@ -246,7 +246,6 @@ class Server(LADSTypes):
         print("Disconnected successfully.")
 
     async def init(self) -> dict:
-        # Clear the list of devices to prevent duplication during re-initialization
         self.devices = []
         data_types = await super().init()
 
@@ -256,7 +255,6 @@ class Server(LADSTypes):
 
         device_set = await self.client.nodes.objects.get_child(f"{self.ns_DI}:DeviceSet")
         nodes = await device_set.get_children(refs=ua.ObjectIds.HasChild, nodeclassmask=ua.NodeClass.Object)
-        # Keep track of processed node IDs to avoid adding duplicate devices
         seen_node_ids = set()
         for node in nodes:
             if node.nodeid in seen_node_ids:
@@ -424,7 +422,7 @@ class SubscriptionHandler(object):
         """
 
         # obviously there is a bug in the library subscription.py
-        #   async def _call_event(self, eventlist: ua.EventNotificationList) -> None:
+        #   async def _call_event(self, eventlist: ua.EventNotificationList) -> None: 
         # ua.EventNotificationList has always only one element, even if multiple events are sent..
         fields_dict = event.get_event_props_as_fields_dict()
         event_fields = {}
@@ -503,8 +501,8 @@ class LADSNode(Node):
 
         self.server: Server = server
         # [ИСПРАВЛЕНИЕ ОШИБКИ BadAttributeIdInvalid]
-        # Ранее здесь был простой await asyncio.gather(...), который прерывал выполнение
-        # и выбрасывал исключение, если какой-то из атрибутов (например, description или dictionary_entries)
+        # Ранее здесь был простой await asyncio.gather(...), который прерывал выполнение 
+        # и выбрасывал исключение, если какой-то из атрибутов (например, description или dictionary_entries) 
         # не поддерживался конкретным узлом на сервере LADS.
         # Метод return_exceptions=True позволяет собрать ошибки как результаты, не обрушивая весь процесс.
         # Ниже мы проверяем, не является ли результат исключением (и если является, подставляем None или пустые значения).
@@ -743,8 +741,8 @@ class BaseVariable(LADSNode):
     async def init(self, server: Server):
         await super().init(server)
         # [ИСПРАВЛЕНИЕ ОШИБКИ BadAttributeIdInvalid]
-        # Аналогично LADSNode.init, некоторые узлы (например, папки, методы или узлы с битыми ссылками)
-        # не имеют DataValue, DataType или AccessLevel.
+        # Аналогично LADSNode.init, некоторые узлы (например, папки, методы или узлы с битыми ссылками) 
+        # не имеют DataValue, DataType или AccessLevel. 
         # Если попытаться их запросить напрямую, сервер ответит ошибкой The attribute is not supported.
         # Поэтому gather собирает значения игнорируя ошибки, и в таком случае возвращается None или пустое множество.
         results = await asyncio.gather(
@@ -1052,8 +1050,21 @@ class StateMachine(LADSNode):
 
     async def init(self, server: Server):
         await super().init(server)
-        self.current_state = await StateVariable.promote(await self.get_child("CurrentState"), server)
-        self.current_state.alternate_display_name = self.display_name
+        # [ИСПРАВЛЕНИЕ ХРУПКОГО ДИЗАЙНА БИБЛИОТЕКИ]
+        # Согласно OPC UA LADS стандарту, узел "CurrentState" является обязательным (Mandatory).
+        # Однако, если реальный сервер предоставляет "не идеальный" XML (например, узел отсутствует
+        # или находится в нестандартном пространстве имен/Namespace), старый вызов self.get_child("CurrentState") 
+        # выбрасывал исключение BadNoMatch (The requested operation has no match to return).
+        # Из-за того, что библиотека не перехватывала эту ошибку, инициализация StateMachine падала,
+        # что по цепочке валило (прерывало) инициализацию FunctionalUnit и всего Device.
+        # Мы оборачиваем это в блок try-except, чтобы клиент был устойчивым (resilient) к таким серверам:
+        try:
+            self.current_state = await StateVariable.promote(await self.get_child("CurrentState"), server)
+            self.current_state.alternate_display_name = self.display_name
+        except Exception as e:
+            # Если сервер не вернул CurrentState (вернул BadNoMatch), мы не роняем программу, а просто игнорируем
+            # и помечаем переменную как None. Клиент продолжит работу и инициализирует методы (Start, Stop и т.д.)
+            self.current_state = None
         nodes = await self.get_methods()
         self.methods = await asyncio.gather(*(Method.promote(node, server) for node in nodes))
         self.methods_dict = {method.display_name: method for method in self.methods}
@@ -1072,7 +1083,12 @@ class StateMachine(LADSNode):
 
     @property
     def variables(self) -> list[BaseVariable]:
-        return super().variables + [self.current_state]
+        # [ИСПРАВЛЕНИЕ ХРУПКОГО ДИЗАЙНА БИБЛИОТЕКИ]
+        # Так как выше мы разрешили self.current_state быть None (при "не идеальном" сервере),
+        # мы не можем просто прибавлять [self.current_state] к списку переменных, потому что туда попадет [None],
+        # что может сломать обход переменных ниже по коду.
+        # Поэтому мы добавляем проверку: если current_state не None, добавляем его в список, иначе просто добавляем []
+        return super().variables + ([self.current_state] if self.current_state else [])
 
 
 # MARK: FunctionalStateMachine
@@ -2381,3 +2397,5 @@ class Connections:
             for connection in self.connections:
                 result.extend(connection.server.functional_units)
         return result
+
+

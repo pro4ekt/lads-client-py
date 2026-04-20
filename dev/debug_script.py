@@ -20,7 +20,34 @@ def main():
     devices = server.devices
     fu_list = devices[0].functional_units
     fun_unit = fu_list[0]
+    var_list = devices[0].variables
     
+    # Чтобы изменить значение переменной, нам нужно её найти.
+    # В LADS переменная (например, SupervisoryJobId) может лежать либо в самом функциональном блоке,
+    # либо внутри одной из его функций.
+    try:
+        target_i = 6018
+        found_var = None
+
+        # 1. Поищем сначала среди переменных самого FunctionalUnit
+        if hasattr(fun_unit, "variables") and var_list:
+            found_var = next((v for v in var_list if v.nodeid.Identifier == target_i), None)
+
+
+        # 2. Применяем значение, если нашли
+        if found_var:
+            print(f"Found target variable: {found_var.display_name}, current value: {found_var.value}")
+            # Изменяем значение
+            print("Setting new value...")
+            found_var.set_value("TestJob_999")
+            time.sleep(1)
+            print(f"New value expected to be requested. Observe if it changes.")
+        else:
+            print(f"Variable with NodeId {target_i} not found in this FunctionalUnit or its Functions.")
+
+    except Exception as e:
+        print(f"Error accessing functions/variables: {e}")
+
     # --------------------- ВЫЗОВ ОПЕРАЦИИ (Метода) ---------------------
     # Согласно стандарту LADS, методы типа Start или StartProgram
     # вызываются на уровне стейт-машины FunctionalUnit (или всего Device), а не отдельной функции.
@@ -37,16 +64,7 @@ def main():
         print(f"\n--- Calling StartProgram on Functional Unit: {fun_unit.unique_name} ---")
         methods = fun_unit.functional_unit_state.method_names
         print(f"Available methods on FunctionalUnit: {list(methods)}")
-        
-        # 1. Задаем свойства (Properties), какие требует ваш алгоритм
-        # Если свойств нет, можно передать пустой DataFrame
-        properties = pd.DataFrame(columns=["Key", "Value"])
-        
-        # 2. Для StartProgram нам понадобится таблица Samples:
-        samples = pd.DataFrame([
-            {"ContainerId": "Plate_1", "SampleId": "S_01", "Position": "A1", "CustomData": ""},
-        ])
-        
+
         try:
             # 3. Вызов метода StartProgram (Сырой OPC UA вызов в обход библиотеки)
 
@@ -69,7 +87,7 @@ def main():
             properties = ua.Variant([], ua.VariantType.ExtensionObject)
             samples = ua.Variant([], ua.VariantType.ExtensionObject)
 
-            # 3. Вызов. Передаем ровно 5 вариантов!
+            """# 3. Вызов. Передаем ровно 5 вариантов!
             fun_unit.functional_unit_state.call_async(
                 fun_unit.functional_unit_state.call_lads_method(
                     "StartProgram",
@@ -80,17 +98,18 @@ def main():
                     ua.Variant("MyTestVariable3", ua.VariantType.String)
                 )
             )
+            """
+
+            fun_unit.functional_unit_state.call_async(
+                fun_unit.functional_unit_state.call_lads_method(
+                    "StartProgram"
+                )
+            )
 
             print("Successfully called StartProgram via raw parameters!")
 
             # Wait for the async task to be evaluated
             time.sleep(1)
-
-            fun_unit.functional_unit_state.call_async(
-                fun_unit.functional_unit_state.call_lads_method(
-                    "Stop"
-                )
-            )
 
         except Exception as e:
             print(f"Error calling StartProgram: {e}")
@@ -100,7 +119,6 @@ def main():
     print("Number of devices: ", len(server.devices))
     for device in server.devices:
         print("  Device: ", device.unique_name)
-
     """
     functional_units = server.functional_units
     print("  Number of functional_units: ", len(functional_units))
