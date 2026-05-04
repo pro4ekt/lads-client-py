@@ -1465,6 +1465,8 @@ class Function(LADSNode):
         """
 
         await super().init(server)
+        self._variables = await get_properties_and_variables(self)
+        self._variables.sort(key = lambda variable: variable.display_name)
         node = await self.get_lads_child("IsEnabled")
         self.is_enabled = await BaseVariable.promote(node, server)
         self.function_set: FunctionSet = await self.get_lads_child("FunctionSet")
@@ -1488,10 +1490,7 @@ class Function(LADSNode):
 
     @property
     def variables(self) -> list[BaseVariable]:
-        if (self.is_enabled is None):
-            return []
-        else:
-            return [self.is_enabled]
+        return self._variables
 
     @property
     def all_variables(self) -> list[BaseVariable]:
@@ -1794,6 +1793,8 @@ class FunctionalUnit(LADSNode):
         """
 
         await super().init(server)
+        self._variables = await get_properties_and_variables(self)
+        self._variables.sort(key = lambda variable: variable.display_name)
         self.function_set, self.functional_unit_state, self.program_manager = await asyncio.gather(
             FunctionSet.promote(await self.get_lads_child("FunctionSet"), server),
             FunctionalStateMachine.promote(await self.get_lads_child("FunctionalUnitState"), server),
@@ -1808,6 +1809,10 @@ class FunctionalUnit(LADSNode):
         # prepare subscriptions (data change will be handled by device)
         # self.subscription_handler = SubscriptionHandler()
         # events_handler = await self.subscription_handler.subscribe_events(self.server, self)
+
+    @property
+    def variables(self) -> list[BaseVariable]:
+        return self._variables
 
     @property
     def subscription_handler(self) -> SubscriptionHandler:
