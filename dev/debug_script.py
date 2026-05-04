@@ -20,19 +20,18 @@ def find_current_state_variable(fun_unit):
     return None
 
 
-def call_device_method_and_wait(conn, device_name, method_name, target_state="Idle", timeout=60):
+def call_device_method_and_wait(conn, device_name, method_name, target_state="Complete", timeout=60):
     print(f"\n[{device_name}] 🚀 Initiating '{method_name}'...")
     try:
         server = conn.server
         fun_unit = server.devices[0].functional_units[0]
 
-        # Объект с методами (Start, Stop, MoveToA и т.д.)
         sm = fun_unit.functional_unit_state
-        # Находим переменную состояния с помощью нашей новой функции
         state_var = find_current_state_variable(fun_unit)
 
         if sm and state_var:
             initial_state = state_var.value_str.strip()
+            last_seen_state = initial_state  # Переменная для отслеживания изменений
 
             # Вызываем метод
             sm.call_async(sm.call_lads_method(method_name))
@@ -40,26 +39,27 @@ def call_device_method_and_wait(conn, device_name, method_name, target_state="Id
             print(f"[{device_name}] ⏳ Initial state: '{initial_state}'. Waiting for '{target_state}'...")
 
             start_time = time.time()
-            # Ждем начала движения (смены состояния)
-            while state_var.value_str.strip() == initial_state:
-                if time.time() - start_time > 5: break
-                time.sleep(0.2)
 
-            # Ждем завершения
             while True:
                 current_state = state_var.value_str.strip()
+
+                # ПРОСТО ПРИНТ ЕСЛИ СОСТОЯНИЕ ИЗМЕНИЛОСЬ
+                if current_state != last_seen_state:
+                    print(f"[{device_name}] 🔄 State changed: '{last_seen_state}' ➔ '{current_state}'")
+                    last_seen_state = current_state
+
+                # Проверка завершения
                 if current_state == target_state:
                     print(f"[{device_name}] ✨ COMPLETED! (State: {current_state})")
                     break
+
                 if time.time() - start_time > timeout:
                     print(f"[{device_name}] ⚠️ Timeout! Last state: '{current_state}'")
                     break
-                time.sleep(0.5)
+
+                time.sleep(0.2)  # Опрос чаще, чтобы не пропустить быстрые изменения
         else:
-            # Дебаг информация, если не нашли
-            sm_info = "Found" if sm else "Missing"
-            sv_info = "Found" if state_var else "Missing"
-            print(f"[{device_name}] ❌ Error: StateMachine={sm_info}, CurrentState={sv_info}")
+            print(f"[{device_name}] ❌ Error: StateMachine or CurrentState not found")
 
     except Exception as e:
         print(f"[{device_name}] ❌ Runtime Error: {e}")

@@ -23,7 +23,7 @@ def process_server(conn):
 
     fun_unit = fu_list[0]
     var_list = devices[0].variables
-
+    a = fun_unit.functions[1].current_state.data_value.Value
     print("\n--- Searching for 'Speed' variable ---")
     speed_var = None
 
