@@ -1979,8 +1979,17 @@ class BaseAnalogDiscreteControlFunction(BaseControlFunction):
         return f"{super().__str__()}\n  {self.current_value}\n  {self.target_value}"
 
     @property
+    @property
     def variables(self) -> list[BaseVariable]:
-        return super().variables + remove_none([self.current_value, self.target_value])
+        # 1. Собираем специфичные переменные
+        specific_vars = remove_none([self.current_value, self.target_value])
+        specific_ids = {v.nodeid for v in specific_vars}
+
+        # 2. Берем базовые переменные, но исключаем те, чьи ID уже есть в specific_vars
+        base_vars = [v for v in super().variables if v.nodeid not in specific_ids]
+
+        # 3. Возвращаем чистый склеенный массив
+        return base_vars + specific_vars
 
 
 # MARK: AnalogControlFunction
