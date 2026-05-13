@@ -3,10 +3,6 @@ import lads_opcua_client as lads
 
 
 def find_target_value_variable(fun_unit, controller_name="VolumeController", var_name="TargetValue"):
-    """
-    Семантический поиск переменной TargetValue внутри контроллера объема.
-    Исключает ошибки смещения индексов при изменениях на сервере.
-    """
     for function in fun_unit.functions:
         func_name = getattr(function, 'name', getattr(function, 'display_name', str(function)))
         if controller_name.lower() in func_name.lower():
@@ -18,9 +14,6 @@ def find_target_value_variable(fun_unit, controller_name="VolumeController", var
 
 
 def find_current_state_variable(fun_unit):
-    """
-    Поиск системной переменной CurrentState.
-    """
     if fun_unit.current_state:
         return fun_unit.current_state
     for function in fun_unit.functions:
@@ -30,10 +23,6 @@ def find_current_state_variable(fun_unit):
 
 
 def execute_and_wait(sm, state_var, method_name, timeout=45):
-    """
-    Вызывает метод и блокирует выполнение скрипта до тех пор,
-    пока конечный автомат сервера не завершит работу (возврат в Idle).
-    """
     print(f"\n---> Initiating method: {method_name}")
     sm.call_async(sm.call_lads_method(method_name))
 
@@ -47,18 +36,27 @@ def execute_and_wait(sm, state_var, method_name, timeout=45):
             print(f"[State Machine]: {last_state} -> {current_state}")
             last_state = current_state
 
-        # Как только сервер вернулся в Idle после выполнения команды - шаг завершен
         if current_state == "Idle" and last_state != "":
-            # Дополнительная проверка, чтобы не сработать на Idle ДО начала выполнения
-            # (предполагаем, что сервер успел перейти как минимум в Running или Complete)
             if time.time() - start_time > 1.0:
-                print(f"✅ Method '{method_name}' workflow completed.")
+                print(f"[OK] Method '{method_name}' workflow completed.")
                 return True
 
         time.sleep(0.2)
 
-    print(f"❌ Error: Timeout waiting for method '{method_name}' to complete.")
+    print(f"[ERROR] Timeout waiting for method '{method_name}' to complete.")
     return False
+
+
+def get_float_input(prompt_text):
+    """
+    Блокирующий запрос пользовательского ввода со строгой типизацией в float.
+    """
+    while True:
+        try:
+            user_input = input(prompt_text)
+            return float(user_input)
+        except ValueError:
+            print("[ERROR] Введено нечисловое значение. Требуется тип Float (например, 25.5). Повторите ввод.")
 
 
 def process_server(conn):
@@ -72,7 +70,6 @@ def process_server(conn):
     device = server.devices[0]
     fun_unit = device.functional_units[0]
 
-    # Инициализация узлов
     target_var = find_target_value_variable(fun_unit)
     state_var = find_current_state_variable(fun_unit)
     sm = fun_unit.functional_unit_state
@@ -84,16 +81,17 @@ def process_server(conn):
     print("Начало выполнения Workflow...")
 
     # ШАГ 1: Набор жидкости (Aspirate)
-    aspiration_volume = 50.0
-    print(f"\n[Шаг 1] Установка TargetValue для Aspirate: {aspiration_volume}")
+    print("\n[Шаг 1] Подготовка к Aspirate")
+    aspiration_volume = get_float_input("Введите объем для Aspirate (TargetValue): ")
+    print(f"Установка TargetValue: {aspiration_volume}")
     target_var.set_value(aspiration_volume)
-    time.sleep(0.5)  # Пауза для гарантии записи подписок
+    time.sleep(0.5)
     execute_and_wait(sm, state_var, "Aspirate")
 
     # ШАГ 2: Сброс жидкости (Dispense)
-    # Сбрасываем жидкость полностью (до 0.0)
-    dispense_target = 0.0
-    print(f"\n[Шаг 2] Установка TargetValue для Dispense: {dispense_target}")
+    print("\n[Шаг 2] Подготовка к Dispense")
+    dispense_target = get_float_input("Введите целевой объем для Dispense (TargetValue): ")
+    print(f"Установка TargetValue: {dispense_target}")
     target_var.set_value(dispense_target)
     time.sleep(0.5)
     execute_and_wait(sm, state_var, "Dispense")
@@ -106,7 +104,7 @@ def process_server(conn):
     print(f"\n[Шаг 4] Вызов AttachTip")
     execute_and_wait(sm, state_var, "AttachTip")
 
-    print("\n========== Workflow завершен успешно ==========")
+    print("\n========== Workflow завершен ==========")
 
 
 def main():
