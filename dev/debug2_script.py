@@ -6,6 +6,24 @@ import time
 import pandas as pd
 
 
+def find_current_state_variable(fun_unit):
+    """
+    Пытается найти переменную CurrentState в функциональном юните.
+    Сначала ищет в корне, затем в контроллерах (functions).
+    """
+    # 1. Проверяем корень самого юнита (через свойство библиотеки)
+    if fun_unit.current_state:
+        return fun_unit.current_state
+
+    # 2. Если в корне нет, ищем во вложенных функциях (контроллерах)
+    for function in fun_unit.functions:
+        # У многих LADS-функций есть свойство current_state (BaseStateMachineFunction)
+        if hasattr(function, 'current_state') and function.current_state:
+            return function.current_state
+
+    return None
+
+
 def process_server(conn):
     print(f"\n========== Processing Server: {conn.server.name} ==========")
     server = conn.server
@@ -44,13 +62,43 @@ def process_server(conn):
 
         try:
             method_to_call = "Aspirate" # Имя метода для вызова
+            target_state = "Complete"
 
             sm = fun_unit.functional_unit_state
-            sm.call_async(sm.call_lads_method(method_to_call))
+            state_var = find_current_state_variable(fun_unit)
 
-            print(f"✅ Found method '{method_to_call}'. Called successfully.")
+            if sm and state_var:
+                initial_state = state_var.value_str.strip()
+                last_seen_state = initial_state
 
-            time.sleep(1)
+                # Вызываем метод
+                sm.call_async(sm.call_lads_method(method_to_call))
+                print(f"✅ Method '{method_to_call}' initiated. Initial state: '{initial_state}'")
+
+                start_time = time.time()
+                timeout = 30
+
+                while True:
+                    current_state = state_var.value_str.strip()
+
+                    # Печатаем при изменении состояния
+                    if current_state != last_seen_state:
+                        print(f"🔄 State changed: '{last_seen_state}' ➔ '{current_state}'")
+                        last_seen_state = current_state
+
+                    # Проверка завершения
+                    if current_state == target_state:
+                        print(f"✨ COMPLETED! (State: {current_state})")
+                        break
+
+                    if time.time() - start_time > timeout:
+                        print(f"⚠️ Timeout! Last state: '{current_state}'")
+                        break
+
+                    time.sleep(0.2)
+            else:
+                print(f"❌ Error: StateMachine or CurrentState not found")
+
         except Exception as e:
             print(f"Error calling {method_to_call}: {e}")
 

@@ -95,9 +95,9 @@ def main():
     call_device_method_and_wait(connections["RobotArm"], "RobotArm", "MoveToA")
 
     # 2. Pipette начинает и заканчивает работу
-    call_device_method_and_wait(connections["Pipette"], "Pipette", "StartPipetting")
+    call_device_method_and_wait(connections["Pipette"], "Pipette", "Aspirate")
     # Предполагаем, что StopPipetting возвращает в Idle
-    call_device_method_and_wait(connections["Pipette"], "Pipette", "StopPipetting")
+    call_device_method_and_wait(connections["Pipette"], "Pipette", "Dispense")
 
     # 3. RobotArm переносит образец в центрифугу
     call_device_method_and_wait(connections["RobotArm"], "RobotArm", "MoveToCentrifuge")
