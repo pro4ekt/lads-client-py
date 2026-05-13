@@ -1,9 +1,64 @@
-from http import client
-from asyncua import ua
-
-import lads_opcua_client as lads
 import time
-import pandas as pd
+import lads_opcua_client as lads
+
+
+def find_target_value_variable(fun_unit, controller_name="VolumeController", var_name="TargetValue"):
+    """
+    Семантический поиск переменной TargetValue внутри контроллера объема.
+    Исключает ошибки смещения индексов при изменениях на сервере.
+    """
+    for function in fun_unit.functions:
+        func_name = getattr(function, 'name', getattr(function, 'display_name', str(function)))
+        if controller_name.lower() in func_name.lower():
+            for var in function.variables:
+                vname = getattr(var, 'name', getattr(var, 'display_name', str(var)))
+                if var_name.lower() in vname.lower():
+                    return var
+    return None
+
+
+def find_current_state_variable(fun_unit):
+    """
+    Поиск системной переменной CurrentState.
+    """
+    if fun_unit.current_state:
+        return fun_unit.current_state
+    for function in fun_unit.functions:
+        if hasattr(function, 'current_state') and function.current_state:
+            return function.current_state
+    return None
+
+
+def execute_and_wait(sm, state_var, method_name, timeout=45):
+    """
+    Вызывает метод и блокирует выполнение скрипта до тех пор,
+    пока конечный автомат сервера не завершит работу (возврат в Idle).
+    """
+    print(f"\n---> Initiating method: {method_name}")
+    sm.call_async(sm.call_lads_method(method_name))
+
+    start_time = time.time()
+    last_state = ""
+
+    while time.time() - start_time < timeout:
+        current_state = state_var.value_str.strip()
+
+        if current_state != last_state:
+            print(f"[State Machine]: {last_state} -> {current_state}")
+            last_state = current_state
+
+        # Как только сервер вернулся в Idle после выполнения команды - шаг завершен
+        if current_state == "Idle" and last_state != "":
+            # Дополнительная проверка, чтобы не сработать на Idle ДО начала выполнения
+            # (предполагаем, что сервер успел перейти как минимум в Running или Complete)
+            if time.time() - start_time > 1.0:
+                print(f"✅ Method '{method_name}' workflow completed.")
+                return True
+
+        time.sleep(0.2)
+
+    print(f"❌ Error: Timeout waiting for method '{method_name}' to complete.")
+    return False
 
 
 def process_server(conn):
@@ -17,47 +72,41 @@ def process_server(conn):
     device = server.devices[0]
     fun_unit = device.functional_units[0]
 
-    # Исправленный момент с переменной
-    # Используем .value для записи, чтобы библиотека синхронизировала значение с сервером
-    try:
-        var = fun_unit.functions[3].variables[3]
-        print(f"\n--- Testing variable change on: {var.display_name} ---")
+    # Инициализация узлов
+    target_var = find_target_value_variable(fun_unit)
+    state_var = find_current_state_variable(fun_unit)
+    sm = fun_unit.functional_unit_state
 
-        a = var.value
-        print(f"Old value: {a}")
+    if not target_var or not state_var or not sm:
+        print("Критическая ошибка: Необходимые узлы (TargetValue, CurrentState или StateMachine) не найдены.")
+        return
 
-        # Присваивание через .value вызывает автоматическую запись на сервер
-        var.set_value(25.5)
-        print(f"Set value requested: 25.5")
+    print("Начало выполнения Workflow...")
 
-        # Небольшая пауза для завершения сетевой операции
-        time.sleep(0.5)
+    # ШАГ 1: Набор жидкости (Aspirate)
+    aspiration_volume = 50.0
+    print(f"\n[Шаг 1] Установка TargetValue для Aspirate: {aspiration_volume}")
+    target_var.set_value(aspiration_volume)
+    time.sleep(0.5)  # Пауза для гарантии записи подписок
+    execute_and_wait(sm, state_var, "Aspirate")
 
-        b = var.value
-        print(f"New confirmed value: {b}")
-    except Exception as e:
-        print(f"Error changing variable: {e}")
+    # ШАГ 2: Сброс жидкости (Dispense)
+    # Сбрасываем жидкость полностью (до 0.0)
+    dispense_target = 0.0
+    print(f"\n[Шаг 2] Установка TargetValue для Dispense: {dispense_target}")
+    target_var.set_value(dispense_target)
+    time.sleep(0.5)
+    execute_and_wait(sm, state_var, "Dispense")
 
-    # --------------------- ВЫЗОВ ОПЕРАЦИИ (Метода) ---------------------
-    if hasattr(fun_unit, 'functional_unit_state'):
-        print(f"\n--- Calling method by name on: {fun_unit.unique_name} ---")
+    # ШАГ 3: Сброс наконечника (EjectTip)
+    print(f"\n[Шаг 3] Вызов EjectTip")
+    execute_and_wait(sm, state_var, "EjectTip")
 
-        try:
-            method_to_call = "Aspirate" # Имя метода для вызова
+    # ШАГ 4: Захват нового наконечника (AttachTip)
+    print(f"\n[Шаг 4] Вызов AttachTip")
+    execute_and_wait(sm, state_var, "AttachTip")
 
-            sm = fun_unit.functional_unit_state
-            sm.call_async(sm.call_lads_method(method_to_call))
-
-            print(f"✅ Found method '{method_to_call}'. Called successfully.")
-
-            time.sleep(1)
-        except Exception as e:
-            print(f"Error calling {method_to_call}: {e}")
-
-    print("\nServer details: ")
-    print("Number of devices: ", len(server.devices))
-    for device in server.devices:
-        print("  Device: ", device.unique_name)
+    print("\n========== Workflow завершен успешно ==========")
 
 
 def main():
@@ -67,28 +116,24 @@ def main():
 
     connections = []
 
-    # 1. Стартуем подключения одновременно
     print("Starting connections...")
     for url in urls:
         conn = lads.Connection(url=url)
         conn.connect()
         connections.append(conn)
 
-    # 2. Ждем, пока оба инициализируются
     print("Waiting for connections to be initialized...")
     for conn in connections:
         while not conn.initialized:
             time.sleep(1)
         print(f"Connection initialized: True")
 
-    # 3. Обрабатываем каждый сервер
     for conn in connections:
         try:
             process_server(conn)
         except Exception as e:
             print(f"Error processing server: {e}")
 
-    # 4. Отключаемся
     for conn in connections:
         conn.disconnect()
 
