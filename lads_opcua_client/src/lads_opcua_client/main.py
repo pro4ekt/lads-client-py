@@ -1979,7 +1979,6 @@ class BaseAnalogDiscreteControlFunction(BaseControlFunction):
         return f"{super().__str__()}\n  {self.current_value}\n  {self.target_value}"
 
     @property
-    @property
     def variables(self) -> list[BaseVariable]:
         # 1. Собираем специфичные переменные
         specific_vars = remove_none([self.current_value, self.target_value])
